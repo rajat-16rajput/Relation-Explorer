@@ -103,10 +103,23 @@ const TreeDiagram: React.FC = () => {
       .attr("font-size", "12px");
 
     // Set initial zoom position
-    svg.call(
-      zoomRef.current.transform,
-      d3.zoomIdentity.translate(dimensions.width / 4, 50)
-    );
+    const DataArchiverNode = root
+      .descendants()
+      .find((node) => node.data.name === "DataArchiver");
+    if (DataArchiverNode) {
+      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>; // Node's position in the tree
+
+      // Calculate the new translation to center "DataArchiver"
+      const centerX = dimensions.width / 2;
+      const centerY = dimensions.height / 2;
+      const translateX = centerX - y;
+      const translateY = centerY - x;
+
+      svg.call(
+        zoomRef.current.transform,
+        d3.zoomIdentity.translate(translateX, translateY).scale(1)
+      );
+    }
   }, [dimensions]);
 
   // Zoom Functions
@@ -120,14 +133,35 @@ const TreeDiagram: React.FC = () => {
       d3.select(svgRef.current).transition().call(zoomRef.current.scaleBy, 0.8);
     }
   };
+
   const resetZoom = () => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current)
+    if (!svgRef.current || !zoomRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    const root = d3.hierarchy(transformDataToTree(jsonData));
+    const treeLayout = d3.tree<TreeNode>().nodeSize([50, 200]);
+    treeLayout(root);
+
+    // 🔍 Find the "DataArchiver" node
+    const DataArchiverNode = root
+      .descendants()
+      .find((node) => node.data.name === "DataArchiver");
+
+    if (DataArchiverNode) {
+      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>; // Node's position in the tree
+
+      // Calculate the new translation to center "DataArchiver"
+      const centerX = dimensions.width / 2;
+      const centerY = dimensions.height / 2;
+      const translateX = centerX - y;
+      const translateY = centerY - x;
+
+      svg
         .transition()
         .duration(750)
         .call(
           zoomRef.current.transform,
-          d3.zoomIdentity.translate(dimensions.width / 4, 50)
+          d3.zoomIdentity.translate(translateX, translateY).scale(1)
         );
     }
   };
