@@ -31,7 +31,7 @@ const TreeDiagram: React.FC = () => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const [dimensions] = useState({ width: 1600, height: 800 });
+  const [dimensions] = useState({ width: 1600, height: 830 });
 
   useEffect(() => {
     if (!svgRef.current) return;
@@ -42,25 +42,37 @@ const TreeDiagram: React.FC = () => {
     const root = d3.hierarchy(data);
     treeLayout(root);
 
-    // Select the SVG and clear previous content
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
-    // Create the main group element
     const g = svg
       .append("g")
       .attr("transform", `translate(${dimensions.width / 4}, 50)`);
-    gRef.current = g.node(); // Store reference to the `<g>` group
+    gRef.current = g.node();
 
-    // Create zoom behavior
+    // Create zoom behavior (Disable zoom on scroll)
     zoomRef.current = d3
       .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 3]) // min zoom 0.5, max 3
+      .scaleExtent([0.5, 3]) // Min zoom 0.5, max 3
+      .filter((event) => {
+        // Allow zoom only on ctrl + scroll or pinch gesture
+        return !event.ctrlKey && event.type !== "wheel";
+      })
       .on("zoom", (event) => {
         d3.select(gRef.current).attr("transform", event.transform);
       });
 
-    svg.call(zoomRef.current); // to apply the zoom behaviour
+    svg.call(zoomRef.current);
+
+    // Enable scrolling for panning (override default zoom behavior)
+    svg.on("wheel", (event) => {
+      event.preventDefault();
+      const transform = d3.zoomTransform(svg.node() as SVGSVGElement);
+      svg.call(
+        zoomRef.current!.transform,
+        transform.translate(0, -event.deltaY * 0.5) // Move up/down on scroll
+      );
+    });
 
     // Create Links
     const linkGenerator = d3
@@ -102,14 +114,12 @@ const TreeDiagram: React.FC = () => {
       .text((d) => d.data.name)
       .attr("font-size", "12px");
 
-    // Set initial zoom position
+    // Centering on "DataArchiver"
     const DataArchiverNode = root
       .descendants()
       .find((node) => node.data.name === "DataArchiver");
     if (DataArchiverNode) {
-      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>; // Node's position in the tree
-
-      // Calculate the new translation to center "DataArchiver"
+      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>;
       const centerX = dimensions.width / 2;
       const centerY = dimensions.height / 2;
       const translateX = centerX - y;
