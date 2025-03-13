@@ -5,23 +5,28 @@ import "./TreeDiagram.scss";
 
 interface TreeNode {
   name: string;
+  expanded?: boolean;
   children?: TreeNode[];
 }
 
-// Function to transform JSON into tree format
+// Function to transform JSON into tree format with expandable nodes
 const transformDataToTree = (data: any): TreeNode => ({
   name: data.name,
+  expanded: true, // Root is always expanded
   children: [
     {
       name: "Applications",
+      expanded: false,
       children: data.applications.map((app: any) => ({ name: app.name })),
     },
     {
       name: "Instances",
+      expanded: false,
       children: data.instances.map((inst: any) => ({ name: inst.name })),
     },
     {
       name: "Capabilities",
+      expanded: false,
       children: data.capabilities.map((cap: any) => ({ name: cap.name })),
     },
   ],
@@ -32,37 +37,64 @@ const TreeDiagram: React.FC = () => {
   const gRef = useRef<SVGGElement | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [dimensions] = useState({ width: 1600, height: 830 });
+  const [treeData, setTreeData] = useState<TreeNode>(
+    transformDataToTree(jsonData)
+  );
+  const [transformState, setTransformState] = useState<d3.ZoomTransform | null>(
+    null
+  );
+
+  // Function to toggle expansion of a node without resetting zoom/pan
+  const toggleNode = (node: TreeNode) => {
+    node.expanded = !node.expanded;
+
+    // Preserve zoom & pan before updating
+    const currentTransform = d3.zoomTransform(svgRef.current as SVGSVGElement);
+    setTransformState(currentTransform);
+
+    // Update tree data
+    setTreeData((prevData) => ({ ...prevData }));
+    // If the clicked node is a parent, recenter
+    if (node.children) {
+      resetZoom();
+    }
+  };
 
   useEffect(() => {
     if (!svgRef.current) return;
-    const data = transformDataToTree(jsonData);
-
-    const treeLayout = d3.tree<TreeNode>().nodeSize([50, 200]);
-
-    const root = d3.hierarchy(data);
-    treeLayout(root);
 
     const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
+    svg.selectAll("*").remove(); // Clear previous elements
+
+    const initialX: number = 100; // Move tree closer to the left
+    const initialY: number = dimensions.height / 2; // Center vertically
 
     const g = svg
-      .append("g")
-      .attr("transform", `translate(${dimensions.width / 4}, 50)`);
+      .append<SVGGElement>("g")
+      .attr("transform", `translate(${initialX}, ${initialY})`);
+
     gRef.current = g.node();
 
-    // Create zoom behavior (Disable zoom on scroll)
+    const treeLayout = d3.tree<TreeNode>().nodeSize([50, 200]);
+    const root = d3.hierarchy(treeData, (d) => (d.expanded ? d.children : [])); // Show only expanded children
+    treeLayout(root);
+
+    // Zoom configuration
     zoomRef.current = d3
       .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 3]) // Min zoom 0.5, max 3
-      .filter((event) => {
-        // Allow zoom only on ctrl + scroll or pinch gesture
-        return !event.ctrlKey && event.type !== "wheel";
-      })
+      .scaleExtent([0.5, 3])
+      .filter((event) => !event.ctrlKey && event.type !== "wheel") // Prevent zoom on normal scroll
       .on("zoom", (event) => {
         d3.select(gRef.current).attr("transform", event.transform);
+        setTransformState(event.transform); // Store the zoom state
       });
 
     svg.call(zoomRef.current);
+
+    // Restore zoom & pan state if available
+    if (transformState) {
+      svg.call(zoomRef.current.transform, transformState);
+    }
 
     // Enable scrolling for panning (override default zoom behavior)
     svg.on("wheel", (event) => {
@@ -70,7 +102,7 @@ const TreeDiagram: React.FC = () => {
       const transform = d3.zoomTransform(svg.node() as SVGSVGElement);
       svg.call(
         zoomRef.current!.transform,
-        transform.translate(0, -event.deltaY * 0.5) // Move up/down on scroll
+        transform.translate(0, -event.deltaY * 0.5)
       );
     });
 
@@ -99,12 +131,13 @@ const TreeDiagram: React.FC = () => {
       .enter()
       .append("g")
       .attr("class", "node")
-      .attr("transform", (d) => `translate(${d.y},${d.x})`);
+      .attr("transform", (d) => `translate(${d.y},${d.x})`)
+      .on("click", (_, d) => toggleNode(d.data));
 
     nodes
       .append("circle")
       .attr("r", 8)
-      .attr("fill", "#69b3a2")
+      .attr("fill", (d) => (d.data.expanded ? "#69b3a2" : "#ff7f0e")) // Change color if expanded
       .attr("stroke", "#000");
 
     nodes
@@ -113,24 +146,8 @@ const TreeDiagram: React.FC = () => {
       .attr("dy", 5)
       .text((d) => d.data.name)
       .attr("font-size", "12px");
-
-    // Centering on "DataArchiver"
-    const DataArchiverNode = root
-      .descendants()
-      .find((node) => node.data.name === "DataArchiver");
-    if (DataArchiverNode) {
-      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>;
-      const centerX = dimensions.width / 2;
-      const centerY = dimensions.height / 2;
-      const translateX = centerX - y;
-      const translateY = centerY - x;
-
-      svg.call(
-        zoomRef.current.transform,
-        d3.zoomIdentity.translate(translateX, translateY).scale(1)
-      );
-    }
-  }, [dimensions]);
+    resetZoom();
+  }, [treeData]); // Preserve zoom & pan state
 
   // Zoom Functions
   const zoomIn = () => {
@@ -152,16 +169,14 @@ const TreeDiagram: React.FC = () => {
     const treeLayout = d3.tree<TreeNode>().nodeSize([50, 200]);
     treeLayout(root);
 
-    // 🔍 Find the "DataArchiver" node
     const DataArchiverNode = root
       .descendants()
       .find((node) => node.data.name === "DataArchiver");
 
     if (DataArchiverNode) {
-      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>; // Node's position in the tree
-
-      // Calculate the new translation to center "DataArchiver"
-      const centerX = dimensions.width / 2;
+      const { x, y } = DataArchiverNode as d3.HierarchyPointNode<TreeNode>;
+      // const centerX = dimensions.width / 2;
+      const centerX = 100;
       const centerY = dimensions.height / 2;
       const translateX = centerX - y;
       const translateY = centerY - x;
@@ -173,17 +188,15 @@ const TreeDiagram: React.FC = () => {
           zoomRef.current.transform,
           d3.zoomIdentity.translate(translateX, translateY).scale(1)
         );
+
+      setTransformState(
+        d3.zoomIdentity.translate(translateX, translateY).scale(1)
+      ); // Update state
     }
   };
 
   return (
     <div className="tree-container">
-      {/* <svg
-        ref={svgRef}
-        width={dimensions.width}
-        height={dimensions.height}
-      ></svg> */}
-
       <div className="result-conatainer">
         <svg
           ref={svgRef}
