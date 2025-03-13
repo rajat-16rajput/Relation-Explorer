@@ -51,9 +51,37 @@ const TreeDiagram: React.FC = () => {
 
   const initialTransformState = useRef<d3.ZoomTransform | null>(null);
 
-  // Function to toggle expansion of a node without resetting zoom/pan
-  const toggleNode = (node: TreeNode) => {
-    node.expanded = !node.expanded;
+  // // Function to toggle expansion of a node without resetting zoom/pan - working
+  // const toggleNode = (node: TreeNode, parent?: TreeNode) => {
+  //   node.expanded = !node.expanded; // Toggle expand/collapse
+
+  //   // Preserve zoom & pan before updating
+  //   const currentTransform = d3.zoomTransform(svgRef.current as SVGSVGElement);
+  //   setTransformState(currentTransform);
+
+  //   // Update tree data
+  //   setTreeData((prevData) => ({ ...prevData }));
+
+  //   // Focus on the **expanded node** when opening OR focus on **parent node** when collapsing
+  //   if (node.expanded) {
+  //     focusOnNode(node);
+  //   } else if (parent) {
+  //     focusOnNode(parent); // Move back to parent
+  //   }
+  // };
+
+  // Function to toggle expansion of a node while collapsing siblings
+  const toggleNode = (node: TreeNode, parent?: TreeNode) => {
+    node.expanded = !node.expanded; // Toggle expand/collapse
+
+    // Collapse all sibling nodes when expanding a node
+    if (node.expanded && parent?.children) {
+      parent.children.forEach((sibling) => {
+        if (sibling !== node) {
+          sibling.expanded = false; // Collapse sibling nodes
+        }
+      });
+    }
 
     // Preserve zoom & pan before updating
     const currentTransform = d3.zoomTransform(svgRef.current as SVGSVGElement);
@@ -61,10 +89,53 @@ const TreeDiagram: React.FC = () => {
 
     // Update tree data
     setTreeData((prevData) => ({ ...prevData }));
-    // If the clicked node is a parent, recenter
-    if (node.children) {
-      resetZoom();
+
+    // Focus on the expanded node when opening OR focus on the parent when collapsing
+    // if (node.expanded) {
+    //   focusOnNode(node);
+    // } else if (parent) {
+    //   focusOnNode(parent);
+    // }
+  };
+
+  // Function to smoothly move view to focus on the expanded node
+  const focusOnNode = (targetNode: TreeNode) => {
+    if (!svgRef.current || !zoomRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    const root = d3.hierarchy(treeData, (d) => (d.expanded ? d.children : []));
+    const treeLayout = d3.tree<TreeNode>().nodeSize([50, 200]);
+    treeLayout(root);
+
+    // Find the target node's position
+    const target = root
+      .descendants()
+      .find((node) => node.data.name === targetNode.name);
+
+    if (target) {
+      const { x, y } = target as d3.HierarchyPointNode<TreeNode>;
+
+      const centerX = 100; // Keep X fixed for a left-aligned tree
+      const centerY = dimensions.height / 2; // Center vertically
+
+      // Calculate translation
+      const translateX = centerX - y;
+      const translateY = centerY - x;
+
+      // Smooth transition to the new position
+      svg
+        .transition()
+        .duration(750)
+        .call(
+          zoomRef.current.transform,
+          d3.zoomIdentity.translate(translateX, translateY).scale(1)
+        );
+
+      setTransformState(
+        d3.zoomIdentity.translate(translateX, translateY).scale(1)
+      );
     }
+    // resetZoom();
   };
 
   useEffect(() => {
@@ -87,32 +158,59 @@ const TreeDiagram: React.FC = () => {
     const root = d3.hierarchy(treeData, (d) => (d.expanded ? d.children : []));
     treeLayout(root);
 
-    // Initialize zoom behavior (if not already initialized)
     if (!zoomRef.current) {
-      // Zoom configuration
+      // ✅ Configure zoom (Ctrl + Scroll OR Pinch Zoom)
       zoomRef.current = d3
         .zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.5, 3])
-        .filter((event) => !event.ctrlKey && event.type !== "wheel") // Prevent zoom on normal scroll
+        .scaleExtent([0.5, 3]) // Set zoom limits
+        // .filter(
+        //   (event) => event.ctrlKey || event.type.startsWith("touch") // Allow only Ctrl+Scroll & Pinch Zoom
+        // )
+        .filter((event) => {
+          // Get bounding box of the SVG
+          const svgBounds = svgRef.current?.getBoundingClientRect();
+          const { clientX, clientY } = event;
+
+          // Check if cursor is inside the SVG bounding box
+          const isInsideSVG =
+            svgBounds &&
+            clientX >= svgBounds.left &&
+            clientX <= svgBounds.right &&
+            clientY >= svgBounds.top &&
+            clientY <= svgBounds.bottom;
+
+          // Allow zoom only when inside SVG and when Ctrl is pressed or using pinch zoom
+          return (
+            isInsideSVG && (event.ctrlKey || event.type.startsWith("touch"))
+          );
+        })
+        .wheelDelta((event) => {
+          return event.deltaY * (event.ctrlKey ? -0.005 : 0); // Adjust sensitivity
+        })
         .on("zoom", (event) => {
           d3.select(gRef.current).attr("transform", event.transform);
-          setTransformState(event.transform); // Store the zoom state
+          setTransformState(event.transform);
         });
 
       svg.call(zoomRef.current);
 
-      // Restore zoom & pan state if available
+      // Restore previous zoom state if available
       if (transformState) {
         svg.call(zoomRef.current.transform, transformState);
       }
+      // Disable drag events (prevents grabbing and dragging the tree)
+      svg.on("mousedown.zoom", null).on("touchstart.zoom", null);
 
-      // Enable scrolling for panning (override default zoom behavior)
+      // Enable only vertical scrolling (pan)
       svg.on("wheel", (event) => {
         event.preventDefault();
         const transform = d3.zoomTransform(svg.node() as SVGSVGElement);
+        const dy = event.deltaY * 0.5; // Adjust scroll speed
         svg.call(
           zoomRef.current!.transform,
-          transform.translate(0, -event.deltaY * 0.5)
+          d3.zoomIdentity
+            .translate(initialX, transform.y - dy)
+            .scale(transform.k)
         );
       });
     }
@@ -146,7 +244,6 @@ const TreeDiagram: React.FC = () => {
       .attr("stroke", "#ccc")
       .attr("fill", "none");
 
-    // Create Nodes
     const nodes = g
       .selectAll(".node")
       .data(root.descendants())
@@ -154,7 +251,7 @@ const TreeDiagram: React.FC = () => {
       .append("g")
       .attr("class", "node")
       .attr("transform", (d) => `translate(${d.y},${d.x})`)
-      .on("click", (_, d) => toggleNode(d.data));
+      .on("click", (_, d) => toggleNode(d.data, d.parent?.data)); // Pass parent node
 
     nodes
       .append("circle")
@@ -218,7 +315,7 @@ const TreeDiagram: React.FC = () => {
 
   const defaultView = () => {
     if (!svgRef.current || !zoomRef.current || !initialTransformState) return;
-
+    resetZoom();
     // ✅ Reset the tree data to its initial state
     setTreeData(transformDataToTree(jsonData));
 
@@ -227,7 +324,6 @@ const TreeDiagram: React.FC = () => {
       .transition()
       .duration(750)
       .call(zoomRef.current.transform, initialTransformState);
-    resetZoom();
   };
 
   return (
@@ -242,8 +338,7 @@ const TreeDiagram: React.FC = () => {
         <div className="buttons">
           <button onClick={zoomIn}>Zoom in</button>
           <button onClick={zoomOut}>Zoom out</button>
-          <button onClick={resetZoom}>Reset</button>
-          <button onClick={defaultView}>Default View</button>
+          <button onClick={defaultView}>Reset</button>
         </div>
       </div>
     </div>
