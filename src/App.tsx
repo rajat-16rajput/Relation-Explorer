@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import jsonData from "./sampleData.json"; // Import the JSON file
+import jsonData from "./sampleData.json";
 import "./TreeDiagram.scss";
 
 interface TreeNode {
@@ -44,31 +44,7 @@ const TreeDiagram: React.FC = () => {
     null
   );
 
-  //default state behaviour
-  // const [initialTreeData] = useState<TreeNode>(transformDataToTree(jsonData));
-  // const [initialTransformState, setInitialTransformState] =
-  //   useState<d3.ZoomTransform | null>(null);
-
   const initialTransformState = useRef<d3.ZoomTransform | null>(null);
-
-  // // Function to toggle expansion of a node without resetting zoom/pan - working
-  // const toggleNode = (node: TreeNode, parent?: TreeNode) => {
-  //   node.expanded = !node.expanded; // Toggle expand/collapse
-
-  //   // Preserve zoom & pan before updating
-  //   const currentTransform = d3.zoomTransform(svgRef.current as SVGSVGElement);
-  //   setTransformState(currentTransform);
-
-  //   // Update tree data
-  //   setTreeData((prevData) => ({ ...prevData }));
-
-  //   // Focus on the **expanded node** when opening OR focus on **parent node** when collapsing
-  //   if (node.expanded) {
-  //     focusOnNode(node);
-  //   } else if (parent) {
-  //     focusOnNode(parent); // Move back to parent
-  //   }
-  // };
 
   // Function to toggle expansion of a node while collapsing siblings
   const toggleNode = (node: TreeNode, parent?: TreeNode) => {
@@ -96,46 +72,6 @@ const TreeDiagram: React.FC = () => {
     // } else if (parent) {
     //   focusOnNode(parent);
     // }
-  };
-
-  // Function to smoothly move view to focus on the expanded node
-  const focusOnNode = (targetNode: TreeNode) => {
-    if (!svgRef.current || !zoomRef.current) return;
-
-    const svg = d3.select(svgRef.current);
-    const root = d3.hierarchy(treeData, (d) => (d.expanded ? d.children : []));
-    const treeLayout = d3.tree<TreeNode>().nodeSize([50, 200]);
-    treeLayout(root);
-
-    // Find the target node's position
-    const target = root
-      .descendants()
-      .find((node) => node.data.name === targetNode.name);
-
-    if (target) {
-      const { x, y } = target as d3.HierarchyPointNode<TreeNode>;
-
-      const centerX = 100; // Keep X fixed for a left-aligned tree
-      const centerY = dimensions.height / 2; // Center vertically
-
-      // Calculate translation
-      const translateX = centerX - y;
-      const translateY = centerY - x;
-
-      // Smooth transition to the new position
-      svg
-        .transition()
-        .duration(750)
-        .call(
-          zoomRef.current.transform,
-          d3.zoomIdentity.translate(translateX, translateY).scale(1)
-        );
-
-      setTransformState(
-        d3.zoomIdentity.translate(translateX, translateY).scale(1)
-      );
-    }
-    // resetZoom();
   };
 
   useEffect(() => {
@@ -215,7 +151,7 @@ const TreeDiagram: React.FC = () => {
       });
     }
 
-    // ✅ Store the initial transform **only once** using useRef
+    // Store the initial transform **only once** using useRef
     if (!initialTransformState.current) {
       initialTransformState.current = d3.zoomIdentity
         .translate(initialX, initialY)
@@ -265,7 +201,7 @@ const TreeDiagram: React.FC = () => {
       .attr("dy", 5)
       .text((d) => d.data.name)
       .attr("font-size", "12px");
-  }, [treeData]); // Runs only when treeData changes
+  }, [dimensions.height, transformState, treeData]);
 
   // Zoom Functions
   const zoomIn = () => {
@@ -313,13 +249,13 @@ const TreeDiagram: React.FC = () => {
     }
   };
 
-  const defaultView = () => {
+  const reset = () => {
     if (!svgRef.current || !zoomRef.current || !initialTransformState) return;
     resetZoom();
-    // ✅ Reset the tree data to its initial state
+    // Reset the tree data to its initial state
     setTreeData(transformDataToTree(jsonData));
 
-    // ✅ Reset zoom and pan to original position
+    // Reset zoom and pan to original position
     d3.select(svgRef.current)
       .transition()
       .duration(750)
@@ -338,7 +274,7 @@ const TreeDiagram: React.FC = () => {
         <div className="buttons">
           <button onClick={zoomIn}>Zoom in</button>
           <button onClick={zoomOut}>Zoom out</button>
-          <button onClick={defaultView}>Reset</button>
+          <button onClick={reset}>Reset</button>
         </div>
       </div>
     </div>
