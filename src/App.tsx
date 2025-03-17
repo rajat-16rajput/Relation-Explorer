@@ -201,7 +201,7 @@ const TreeDiagram: React.FC = () => {
       .attr("dy", 5)
       .text((d) => d.data.name)
       .attr("font-size", "12px");
-  }, [dimensions.height, transformState, treeData]);
+  }, [treeData]);
 
   // Zoom Functions
   const zoomIn = () => {
@@ -274,7 +274,7 @@ const TreeDiagram: React.FC = () => {
         <div className="buttons">
           <button onClick={zoomIn}>Zoom in</button>
           <button onClick={zoomOut}>Zoom out</button>
-          <button onClick={reset}>Reset</button>
+          <button onClick={resetZoom}>Reset</button>
         </div>
       </div>
     </div>
